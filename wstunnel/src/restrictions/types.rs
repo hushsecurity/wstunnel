@@ -18,6 +18,13 @@ pub struct RestrictionConfig {
     pub allow: Vec<AllowConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq)]
+pub enum BearerHashType {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub enum MatchConfig {
     Any,
@@ -25,6 +32,7 @@ pub enum MatchConfig {
     PathPrefix(Regex),
     #[serde(with = "serde_regex")]
     Authorization(Regex),
+    BearerHash(BearerHashType, String),
 }
 
 #[derive(Debug, Clone, Deserialize)]
