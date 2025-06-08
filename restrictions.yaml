@@ -13,6 +13,10 @@ restrictions:
       # This match applies only if it succeeds to match the Authentication Header with the given regex.
       # If present, Authentication Header must exists and must match the regex.
       # - !Authorization "^[Bb]earer +actual_bearer_token_to_match$"
+      # This match applies if the Authorization Header carries a bearer token whose hash matches a value
+      # given in hex-digest format.
+      # If present, Authentication Header must exists, must carry a Bearer token, and its hash must match.
+      # - !BearerHash ["Sha256", "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5"]
       # The only other possible match type for now is !Any, that match everything/any request
       # - !Any
 

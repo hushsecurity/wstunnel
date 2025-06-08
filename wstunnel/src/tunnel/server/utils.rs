@@ -1,6 +1,6 @@
 use crate::restrictions::types::{
-    AllowConfig, AllowReverseTunnelConfig, AllowTunnelConfig, MatchConfig, RestrictionConfig, RestrictionsRules,
-    ReverseTunnelConfigProtocol, TunnelConfigProtocol,
+    AllowConfig, AllowReverseTunnelConfig, AllowTunnelConfig, BearerHashType, MatchConfig, RestrictionConfig,
+    RestrictionsRules, ReverseTunnelConfigProtocol, TunnelConfigProtocol,
 };
 use crate::tunnel::RemoteAddr;
 use crate::tunnel::transport::{JWT_HEADER_PREFIX, JwtTunnelConfig, jwt_token_to_tunnel, tunnel_to_jwt_token};
@@ -12,6 +12,8 @@ use hyper::body::{Body, Incoming};
 use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SEC_WEBSOCKET_PROTOCOL};
 use hyper::{Request, Response, StatusCode, http};
 use jsonwebtoken::TokenData;
+use regex::Regex;
+use sha2::Digest;
 use std::net::IpAddr;
 use tracing::{error, info, warn};
 use url::Host;
@@ -116,8 +118,24 @@ impl RestrictionConfig {
             MatchConfig::Any => true,
             MatchConfig::PathPrefix(path) => path.is_match(path_prefix),
             MatchConfig::Authorization(auth) => authorization_header_val.is_some_and(|val| auth.is_match(val)),
+            MatchConfig::BearerHash(hash_type, hash_val) => {
+                authorization_header_val.is_some_and(|val| auth_bearer_match(hash_type, hash_val, val))
+            }
         })
     }
+}
+
+fn auth_bearer_match(hash_type: &BearerHashType, hash_val: &str, auth_val: &str) -> bool {
+    let re = Regex::new(r"^[Bb]earer\s+([[:graph:]]+)\s*$").unwrap();
+    let Some(caps) = re.captures(auth_val) else {
+        return false;
+    };
+    let digest = match hash_type {
+        BearerHashType::Sha256 => format!("{:02x}", sha2::Sha256::digest(&caps[1])),
+        BearerHashType::Sha384 => format!("{:02x}", sha2::Sha384::digest(&caps[1])),
+        BearerHashType::Sha512 => format!("{:02x}", sha2::Sha512::digest(&caps[1])),
+    };
+    digest.eq_ignore_ascii_case(hash_val)
 }
 
 impl AllowReverseTunnelConfig {
