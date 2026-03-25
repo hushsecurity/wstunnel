@@ -170,7 +170,7 @@ impl<E: TokioExecutorRef> WsClient<E> {
                         Ok((r, w, response)) => (TunnelReader::Websocket(r), TunnelWriter::Websocket(w), response),
                         Err(err) => {
                             let reconnect_delay = reconnect_delay();
-                            event!(parent: &span, Level::ERROR, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);
+                            event!(parent: &span, Level::INFO, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);
                             tokio::time::sleep(reconnect_delay).await;
                             continue;
                         }
@@ -184,7 +184,7 @@ impl<E: TokioExecutorRef> WsClient<E> {
                         Ok((r, w, response)) => (TunnelReader::Http2(r), TunnelWriter::Http2(w), response),
                         Err(err) => {
                             let reconnect_delay = reconnect_delay();
-                            event!(parent: &span, Level::ERROR, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);
+                            event!(parent: &span, Level::INFO, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);
                             tokio::time::sleep(reconnect_delay).await;
                             continue;
                         }
