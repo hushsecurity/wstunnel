@@ -113,16 +113,21 @@ pub(super) fn extract_tunnel_info(req: &Request<Incoming>) -> anyhow::Result<Tok
 
 impl RestrictionConfig {
     /// Returns true if the parameters match the restriction config
-    #[inline]
-    fn filter(self: &RestrictionConfig, path_prefix: &str, authorization_header_val: Option<&str>) -> bool {
-        self.r#match.iter().all(|m| match m {
-            MatchConfig::Any => true,
-            MatchConfig::PathPrefix(path) => path.is_match(path_prefix),
-            MatchConfig::Authorization(auth) => authorization_header_val.is_some_and(|val| auth.is_match(val)),
-            MatchConfig::BearerHash(hash_type, hash_val) => {
-                authorization_header_val.is_some_and(|val| auth_bearer_match(hash_type, hash_val, val))
+    async fn filter(self: &RestrictionConfig, path_prefix: &str, authorization_header_val: Option<&str>) -> bool {
+        for m in &self.r#match {
+            let matched = match m {
+                MatchConfig::Any => true,
+                MatchConfig::PathPrefix(path) => path.is_match(path_prefix),
+                MatchConfig::Authorization(auth) => authorization_header_val.is_some_and(|val| auth.is_match(val)),
+                MatchConfig::BearerHash(hash_type, hash_val) => {
+                    authorization_header_val.is_some_and(|val| auth_bearer_match(hash_type, hash_val, val))
+                }
+            };
+            if !matched {
+                return false;
             }
-        })
+        }
+        true
     }
 }
 
@@ -207,18 +212,20 @@ impl AllowConfig {
 /// # Return value:
 /// * `Some(restriction)` - Tunnel is allowed. Encapsulates the restriction that allowed the tunnel.
 /// * `None` - Tunnel is not allowed.
-#[inline]
-pub(super) fn validate_tunnel<'a>(
+pub(super) async fn validate_tunnel<'a>(
     remote: &RemoteAddr,
     path_prefix: &str,
     authorization: Option<&str>,
     restrictions: &'a RestrictionsRules,
 ) -> Option<&'a RestrictionConfig> {
-    restrictions
-        .restrictions
-        .iter()
-        .filter(|restriction| restriction.filter(path_prefix, authorization))
-        .find(|restriction| restriction.allow.iter().any(|allow| allow.is_allowed(remote)))
+    for restriction in &restrictions.restrictions {
+        if restriction.filter(path_prefix, authorization).await
+            && restriction.allow.iter().any(|allow| allow.is_allowed(remote))
+        {
+            return Some(restriction);
+        }
+    }
+    None
 }
 
 pub(super) fn inject_cookie(response: &mut http::Response<impl Body>, remote_addr: &RemoteAddr) -> Result<(), ()> {
@@ -240,8 +247,8 @@ mod tests {
     use regex::Regex;
     use std::net::Ipv6Addr;
 
-    #[test]
-    fn test_validate_tunnel() {
+    #[tokio::test]
+    async fn test_validate_tunnel() {
         let restrictions = RestrictionsRules {
             restrictions: vec![
                 // tunnel
@@ -276,6 +283,7 @@ mod tests {
         };
         assert_eq!(
             validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
                 .unwrap()
                 .name,
             restrictions.restrictions[0].name
@@ -288,6 +296,7 @@ mod tests {
         };
         assert_eq!(
             validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
                 .unwrap()
                 .name,
             restrictions.restrictions[1].name
@@ -298,14 +307,22 @@ mod tests {
             host: Host::Ipv4([127, 0, 0, 1].into()),
             port: 81,
         };
-        assert!(validate_tunnel(&remote, "/doesnt/matter", None, &restrictions).is_none());
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
+                .is_none()
+        );
 
         let remote = RemoteAddr {
             protocol: LocalProtocol::Tcp { proxy_protocol: false },
             host: Host::Ipv4([127, 0, 1, 1].into()),
             port: 80,
         };
-        assert!(validate_tunnel(&remote, "/doesnt/matter", None, &restrictions).is_none());
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
+                .is_none()
+        );
 
         let remote = RemoteAddr {
             protocol: LocalProtocol::Tcp { proxy_protocol: false },
@@ -314,6 +331,7 @@ mod tests {
         };
         assert_eq!(
             validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
                 .unwrap()
                 .name,
             restrictions.restrictions[0].name
@@ -324,18 +342,26 @@ mod tests {
             host: Host::Domain("not.com".into()),
             port: 80,
         };
-        assert!(validate_tunnel(&remote, "/doesnt/matter", None, &restrictions).is_none());
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
+                .is_none()
+        );
 
         let remote = RemoteAddr {
             protocol: LocalProtocol::Tcp { proxy_protocol: false },
             host: Host::Ipv6(Ipv6Addr::LOCALHOST),
             port: 80,
         };
-        assert!(validate_tunnel(&remote, "/doesnt/matter", None, &restrictions).is_none());
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
+                .is_none()
+        );
     }
 
-    #[test]
-    fn test_validate_tunnel_with_auth() {
+    #[tokio::test]
+    async fn test_validate_tunnel_with_auth() {
         let restrictions = RestrictionsRules {
             restrictions: vec![RestrictionConfig {
                 name: "restrict1".into(),
@@ -358,12 +384,21 @@ mod tests {
         };
         assert_eq!(
             validate_tunnel(&remote, "/doesnt/matter", Some("Bearer the-bearer-token"), &restrictions)
+                .await
                 .unwrap()
                 .name,
             restrictions.restrictions[0].name
         );
-        assert!(validate_tunnel(&remote, "/doesnt/matter", Some("Bearer other-bearer-token"), &restrictions).is_none());
-        assert!(validate_tunnel(&remote, "/doesnt/matter", None, &restrictions).is_none());
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", Some("Bearer other-bearer-token"), &restrictions)
+                .await
+                .is_none()
+        );
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+                .await
+                .is_none()
+        );
     }
 
     #[test]
