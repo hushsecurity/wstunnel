@@ -35,10 +35,15 @@ impl RestrictionsRulesReloaderState {
 pub struct RestrictionsRulesReloader {
     state: RestrictionsRulesReloaderState,
     restrictions: Arc<ArcSwap<RestrictionsRules>>,
+    jwt_verifier_present: bool,
 }
 
 impl RestrictionsRulesReloader {
-    pub fn new(restrictions_rules: RestrictionsRules, config_path: Option<PathBuf>) -> anyhow::Result<Self> {
+    pub fn new(
+        restrictions_rules: RestrictionsRules,
+        config_path: Option<PathBuf>,
+        jwt_verifier_present: bool,
+    ) -> anyhow::Result<Self> {
         // If there is no custom certificate and private key, there is nothing to watch
         let config_path = if let Some(config_path) = config_path {
             config_path
@@ -46,6 +51,7 @@ impl RestrictionsRulesReloader {
             return Ok(Self {
                 state: Static,
                 restrictions: Arc::new(ArcSwap::from_pointee(restrictions_rules)),
+                jwt_verifier_present,
             });
         };
         let reloader = Self {
@@ -54,6 +60,7 @@ impl RestrictionsRulesReloader {
                 config_path,
             })),
             restrictions: Arc::new(ArcSwap::from_pointee(restrictions_rules)),
+            jwt_verifier_present,
         };
 
         info!("Starting to watch restriction config file for changes to reload them");
@@ -76,21 +83,30 @@ impl RestrictionsRulesReloader {
     }
 
     pub fn reload_restrictions_config(&self) {
-        let restrictions = match &self.state {
+        let new_restrictions = match &self.state {
             Static => return,
             Config(st) => match RestrictionsRules::from_config_file(&st.config_path) {
-                Ok(restrictions) => {
-                    info!("Restrictions config file has been reloaded");
-                    restrictions
-                }
+                Ok(r) => r,
                 Err(err) => {
-                    error!("Cannot reload restrictions config file, keeping the old one. Error: {:?}", err);
+                    error!(
+                        "Cannot reload restrictions config file, keeping the old one. Parse error: {:?}",
+                        err
+                    );
                     return;
                 }
             },
         };
 
-        self.restrictions.store(Arc::new(restrictions));
+        if let Err(err) = new_restrictions.validate_runtime_consistency(self.jwt_verifier_present) {
+            error!(
+                "Cannot reload restrictions config file, keeping the old one. Validation error: {:?}",
+                err
+            );
+            return;
+        }
+
+        info!("Restrictions config file has been reloaded");
+        self.restrictions.store(Arc::new(new_restrictions));
     }
 
     pub const fn restrictions_rules(&self) -> &Arc<ArcSwap<RestrictionsRules>> {

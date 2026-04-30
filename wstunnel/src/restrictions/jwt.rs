@@ -1,6 +1,3 @@
-// JwtVerifier is dead code until a later commit wires it into the matcher pipeline.
-#![allow(dead_code)]
-
 use crate::restrictions::auth::extract_bearer;
 use crate::restrictions::types::JwtMatchConfig;
 use anyhow::Context;

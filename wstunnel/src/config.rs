@@ -340,6 +340,52 @@ pub struct Server {
     #[cfg_attr(feature = "clap", arg(long, verbatim_doc_comment))]
     pub restrict_config: Option<PathBuf>,
 
+    /// Redis URL for fetching JWT public keys (one per JWT `kid`).
+    /// Required when restrictions.yaml configures a `!Jwt` matcher.
+    /// Credentials must be embedded in the URL: `redis://[user]:<password>@host:port/db`
+    /// or `rediss://...` for TLS.
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "URL",
+            env = "WSTUNNEL_JWT_KEYS_REDIS_URL",
+            requires = "jwt_keys_redis_hash",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_keys_redis_url: Option<String>,
+
+    /// Name of the Redis hash that maps each JWT `kid` (field) to a PEM-encoded
+    /// public key (value). The lookup is `HGET <hash> <kid>`.
+    /// Required when --jwt-keys-redis-url is set.
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "HASH",
+            env = "WSTUNNEL_JWT_KEYS_REDIS_HASH",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_keys_redis_hash: Option<String>,
+
+    /// Maximum lifetime (in seconds) of a cached JWT public key. Once this elapses, the
+    /// next request for that kid forces a fresh Redis lookup; cache hits do not extend
+    /// the lifetime. Caps how long a revoked key keeps being honoured.
+    /// Default: 3600 (1 hour).
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "SECONDS",
+            default_value = "3600",
+            env = "WSTUNNEL_JWT_KEY_CACHE_MAX_LIFETIME_SEC",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_key_cache_max_lifetime_sec: u64,
+
     /// [Optional] Use custom certificate (pem) instead of the default embedded self-signed certificate.
     /// The certificate will be automatically reloaded if it changes
     #[cfg_attr(feature = "clap", arg(long, value_name = "FILE_PATH", verbatim_doc_comment))]

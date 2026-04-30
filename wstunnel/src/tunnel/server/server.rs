@@ -9,6 +9,7 @@ use crate::protocols;
 use crate::protocols::dns::DnsResolver;
 use crate::protocols::tls;
 use crate::restrictions::config_reloader::RestrictionsRulesReloader;
+use crate::restrictions::jwt::JwtVerifier;
 use crate::restrictions::types::{RestrictionConfig, RestrictionsRules};
 use crate::somark::SoMark;
 use crate::tunnel::connectors::{TcpTunnelConnector, TunnelConnector, UdpTunnelConnector};
@@ -63,6 +64,7 @@ pub struct WsServerConfig {
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
     pub remote_server_idle_timeout: Duration,
+    pub jwt_verifier: Option<Arc<JwtVerifier>>,
 }
 
 #[derive(Clone)]
@@ -399,7 +401,11 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         };
 
         // Bind server and run forever to serve incoming connections.
-        let restrictions = RestrictionsRulesReloader::new(restrictions, self.config.restriction_config.clone())?;
+        let restrictions = RestrictionsRulesReloader::new(
+            restrictions,
+            self.config.restriction_config.clone(),
+            self.config.jwt_verifier.is_some(),
+        )?;
         let listener = TcpListener::bind(&self.config.bind)
             .await
             .with_context(|| format!("Failed to bind to socket on {}", self.config.bind))?;
@@ -536,6 +542,7 @@ impl Debug for WsServerConfig {
                     .map(|x| x.tls_client_ca_certificates.is_some())
                     .unwrap_or(false),
             )
+            .field("jwt_verifier", &self.jwt_verifier)
             .finish()
     }
 }
