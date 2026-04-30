@@ -1,3 +1,4 @@
+use crate::restrictions::auth::extract_bearer;
 use crate::restrictions::types::{
     AllowConfig, AllowReverseTunnelConfig, AllowTunnelConfig, BearerHashType, MatchConfig, RestrictionConfig,
     RestrictionsRules, ReverseTunnelConfigProtocol, TunnelConfigProtocol,
@@ -13,7 +14,6 @@ use hyper::body::{Body, Incoming};
 use hyper::header::{AUTHORIZATION, COOKIE, HeaderValue, SEC_WEBSOCKET_PROTOCOL};
 use hyper::{Request, Response, StatusCode, http};
 use jsonwebtoken::TokenData;
-use regex::Regex;
 use sha2::Digest;
 use std::net::IpAddr;
 use tracing::{error, info};
@@ -132,14 +132,13 @@ impl RestrictionConfig {
 }
 
 fn auth_bearer_match(hash_type: &BearerHashType, hash_val: &str, auth_val: &str) -> bool {
-    let re = Regex::new(r"^[Bb]earer\s+([[:graph:]]+)\s*$").unwrap();
-    let Some(caps) = re.captures(auth_val) else {
+    let Some(token) = extract_bearer(auth_val) else {
         return false;
     };
     let digest = match hash_type {
-        BearerHashType::Sha256 => format!("{:02x}", sha2::Sha256::digest(&caps[1])),
-        BearerHashType::Sha384 => format!("{:02x}", sha2::Sha384::digest(&caps[1])),
-        BearerHashType::Sha512 => format!("{:02x}", sha2::Sha512::digest(&caps[1])),
+        BearerHashType::Sha256 => format!("{:02x}", sha2::Sha256::digest(token)),
+        BearerHashType::Sha384 => format!("{:02x}", sha2::Sha384::digest(token)),
+        BearerHashType::Sha512 => format!("{:02x}", sha2::Sha512::digest(token)),
     };
     digest.eq_ignore_ascii_case(hash_val)
 }

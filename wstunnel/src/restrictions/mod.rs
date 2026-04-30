@@ -11,6 +11,7 @@ use types::RestrictionsRules;
 
 use crate::restrictions::types::{default_cidr, default_host};
 
+pub mod auth;
 pub mod config_reloader;
 pub mod types;
 
