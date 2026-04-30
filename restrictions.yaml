@@ -17,6 +17,18 @@ restrictions:
       # given in hex-digest format.
       # If present, Authentication Header must exists, must carry a Bearer token, and its hash must match.
       # - !BearerHash ["Sha256", "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5"]
+      # This match applies if the Authorization Header carries a Bearer JWT whose RS256/RS384/RS512
+      # signature verifies against a kid-keyed public key fetched from Redis (configured via
+      # --jwt-redis-url and --jwt-redis-key-prefix on the server subcommand) AND whose claims match
+      # the configured allow-lists. Each claim maps to a non-empty list of allowed string values;
+      # the decoded claim must equal at least one entry.
+      # - !Jwt
+      #     required_claims:
+      #       sub:
+      #         - my-expected-subject
+      #       # iss:
+      #       #   - my-issuer
+      #       #   - my-other-issuer
       # The only other possible match type for now is !Any, that match everything/any request
       # - !Any
 
