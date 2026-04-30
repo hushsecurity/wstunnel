@@ -1,4 +1,5 @@
 use crate::restrictions::auth::extract_bearer;
+use crate::restrictions::jwt::JwtVerifier;
 use crate::restrictions::types::{
     AllowConfig, AllowReverseTunnelConfig, AllowTunnelConfig, BearerHashType, MatchConfig, RestrictionConfig,
     RestrictionsRules, ReverseTunnelConfigProtocol, TunnelConfigProtocol,
@@ -16,6 +17,7 @@ use hyper::{Request, Response, StatusCode, http};
 use jsonwebtoken::TokenData;
 use sha2::Digest;
 use std::net::IpAddr;
+use std::sync::Arc;
 use tracing::{error, info};
 use url::Host;
 use uuid::Uuid;
@@ -113,7 +115,12 @@ pub(super) fn extract_tunnel_info(req: &Request<Incoming>) -> anyhow::Result<Tok
 
 impl RestrictionConfig {
     /// Returns true if the parameters match the restriction config
-    async fn filter(self: &RestrictionConfig, path_prefix: &str, authorization_header_val: Option<&str>) -> bool {
+    async fn filter(
+        self: &RestrictionConfig,
+        path_prefix: &str,
+        authorization_header_val: Option<&str>,
+        jwt_verifier: Option<&Arc<JwtVerifier>>,
+    ) -> bool {
         for m in &self.r#match {
             let matched = match m {
                 MatchConfig::Any => true,
@@ -122,8 +129,12 @@ impl RestrictionConfig {
                 MatchConfig::BearerHash(hash_type, hash_val) => {
                     authorization_header_val.is_some_and(|val| auth_bearer_match(hash_type, hash_val, val))
                 }
-                // JWT verification is wired up in a later commit; fail closed for now.
-                MatchConfig::Jwt(_) => false,
+                MatchConfig::Jwt(cfg) => match (jwt_verifier, authorization_header_val) {
+                    (Some(verifier), Some(auth)) => verifier.matches(auth, cfg).await,
+                    // No verifier configured (load-time validation should have caught this) or
+                    // no Authorization header on the request: fail closed.
+                    _ => false,
+                },
             };
             if !matched {
                 return false;
@@ -218,9 +229,10 @@ pub(super) async fn validate_tunnel<'a>(
     path_prefix: &str,
     authorization: Option<&str>,
     restrictions: &'a RestrictionsRules,
+    jwt_verifier: Option<&Arc<JwtVerifier>>,
 ) -> Option<&'a RestrictionConfig> {
     for restriction in &restrictions.restrictions {
-        if restriction.filter(path_prefix, authorization).await
+        if restriction.filter(path_prefix, authorization, jwt_verifier).await
             && restriction.allow.iter().any(|allow| allow.is_allowed(remote))
         {
             return Some(restriction);
@@ -283,7 +295,7 @@ mod tests {
             port: 80,
         };
         assert_eq!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .unwrap()
                 .name,
@@ -296,7 +308,7 @@ mod tests {
             port: 80,
         };
         assert_eq!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .unwrap()
                 .name,
@@ -309,7 +321,7 @@ mod tests {
             port: 81,
         };
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .is_none()
         );
@@ -320,7 +332,7 @@ mod tests {
             port: 80,
         };
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .is_none()
         );
@@ -331,7 +343,7 @@ mod tests {
             port: 80,
         };
         assert_eq!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .unwrap()
                 .name,
@@ -344,7 +356,7 @@ mod tests {
             port: 80,
         };
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .is_none()
         );
@@ -355,7 +367,7 @@ mod tests {
             port: 80,
         };
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .is_none()
         );
@@ -384,21 +396,218 @@ mod tests {
             port: 80,
         };
         assert_eq!(
-            validate_tunnel(&remote, "/doesnt/matter", Some("Bearer the-bearer-token"), &restrictions)
+            validate_tunnel(&remote, "/doesnt/matter", Some("Bearer the-bearer-token"), &restrictions, None)
                 .await
                 .unwrap()
                 .name,
             restrictions.restrictions[0].name
         );
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", Some("Bearer other-bearer-token"), &restrictions)
+            validate_tunnel(
+                &remote,
+                "/doesnt/matter",
+                Some("Bearer other-bearer-token"),
+                &restrictions,
+                None
+            )
+            .await
+            .is_none()
+        );
+        assert!(
+            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions, None)
                 .await
                 .is_none()
         );
+    }
+
+    /// End-to-end exercise of the Jwt matcher path: validate_tunnel → filter →
+    /// JwtVerifier::matches. RestrictionsRules is built from a YAML snippet so the
+    /// !Jwt tag, required_claims field, and allow-list shape are exercised alongside
+    /// the matcher pipeline. Covers multi-value allow-list, mismatched value, and the
+    /// defensive `verifier: None` case.
+    #[tokio::test]
+    async fn test_validate_tunnel_with_jwt() {
+        use crate::restrictions::jwt::{TEST_PRIVATE_PEM, TEST_PUBLIC_PEM};
+        use jsonwebtoken::{Algorithm, EncodingKey, Header};
+        use std::collections::HashMap;
+        use std::time::{Duration, SystemTime};
+
+        const YAML: &str = r#"
+restrictions:
+  - name: jwt-clients
+    match:
+      - !Jwt
+        required_claims:
+          sub:
+            - alice
+            - bob
+    allow:
+      - !Tunnel {}
+"#;
+        let restrictions: RestrictionsRules = serde_yaml::from_str(YAML).expect("yaml parse");
+        restrictions.validate_jwt_matchers().expect("validate");
+
+        let mut keys = HashMap::new();
+        keys.insert("test-kid".to_string(), TEST_PUBLIC_PEM.to_string());
+        let verifier = Arc::new(JwtVerifier::with_static_keys(keys, Duration::from_secs(3600)));
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let make_token = |sub: &str| {
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = Some("test-kid".to_string());
+            let claims = serde_json::json!({ "sub": sub, "exp": now + 60 });
+            let key = EncodingKey::from_rsa_pem(TEST_PRIVATE_PEM.as_bytes()).unwrap();
+            jsonwebtoken::encode(&header, &claims, &key).unwrap()
+        };
+
+        let remote = RemoteAddr {
+            protocol: LocalProtocol::Tcp { proxy_protocol: false },
+            host: Host::Ipv4([127, 0, 0, 1].into()),
+            port: 80,
+        };
+
+        // Each listed `sub` value matches.
+        for sub in ["alice", "bob"] {
+            let token = make_token(sub);
+            assert_eq!(
+                validate_tunnel(
+                    &remote,
+                    "/anything",
+                    Some(&format!("Bearer {token}")),
+                    &restrictions,
+                    Some(&verifier),
+                )
+                .await
+                .unwrap()
+                .name,
+                "jwt-clients",
+                "sub={sub} should match"
+            );
+        }
+
+        // Unlisted sub → no match.
+        let token = make_token("eve");
         assert!(
-            validate_tunnel(&remote, "/doesnt/matter", None, &restrictions)
+            validate_tunnel(
+                &remote,
+                "/anything",
+                Some(&format!("Bearer {token}")),
+                &restrictions,
+                Some(&verifier),
+            )
+            .await
+            .is_none()
+        );
+
+        // No verifier configured (defensive): fail closed even with a valid-looking token.
+        let token = make_token("alice");
+        assert!(
+            validate_tunnel(&remote, "/anything", Some(&format!("Bearer {token}")), &restrictions, None,)
                 .await
                 .is_none()
+        );
+    }
+
+    /// Two restrictions in the same rules: one BearerHash (Sha256), one Jwt.
+    /// Verifies that the same Authorization header field can drive different matcher
+    /// types and that validate_tunnel returns the matching restriction by name.
+    /// Uses a YAML snippet so the schema for both matcher variants is exercised
+    /// alongside the matching logic.
+    #[tokio::test]
+    async fn test_validate_tunnel_mixes_bearer_hash_and_jwt() {
+        use crate::restrictions::jwt::{TEST_PRIVATE_PEM, TEST_PUBLIC_PEM};
+        use jsonwebtoken::{Algorithm, EncodingKey, Header};
+        use std::collections::HashMap;
+        use std::time::{Duration, SystemTime};
+
+        let bearer_token = "shared-secret-12345";
+        let bearer_hash = format!("{:02x}", sha2::Sha256::digest(bearer_token.as_bytes()));
+
+        let yaml = format!(
+            r#"
+restrictions:
+  - name: legacy-bearer
+    match:
+      - !BearerHash ["Sha256", "{bearer_hash}"]
+    allow:
+      - !Tunnel {{}}
+  - name: jwt-clients
+    match:
+      - !Jwt
+        required_claims:
+          sub:
+            - alice
+    allow:
+      - !Tunnel {{}}
+"#
+        );
+        let restrictions: RestrictionsRules = serde_yaml::from_str(&yaml).expect("yaml parse");
+        restrictions.validate_jwt_matchers().expect("validate");
+
+        let mut keys = HashMap::new();
+        keys.insert("test-kid".to_string(), TEST_PUBLIC_PEM.to_string());
+        let verifier = Arc::new(JwtVerifier::with_static_keys(keys, Duration::from_secs(3600)));
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some("test-kid".to_string());
+        let claims = serde_json::json!({ "sub": "alice", "exp": now + 60 });
+        let signing_key = EncodingKey::from_rsa_pem(TEST_PRIVATE_PEM.as_bytes()).unwrap();
+        let jwt = jsonwebtoken::encode(&header, &claims, &signing_key).unwrap();
+
+        let remote = RemoteAddr {
+            protocol: LocalProtocol::Tcp { proxy_protocol: false },
+            host: Host::Ipv4([127, 0, 0, 1].into()),
+            port: 80,
+        };
+
+        // Plain bearer token matches the BearerHash restriction.
+        assert_eq!(
+            validate_tunnel(
+                &remote,
+                "/anything",
+                Some(&format!("Bearer {bearer_token}")),
+                &restrictions,
+                Some(&verifier),
+            )
+            .await
+            .unwrap()
+            .name,
+            "legacy-bearer"
+        );
+
+        // Signed JWT matches the Jwt restriction.
+        assert_eq!(
+            validate_tunnel(
+                &remote,
+                "/anything",
+                Some(&format!("Bearer {jwt}")),
+                &restrictions,
+                Some(&verifier),
+            )
+            .await
+            .unwrap()
+            .name,
+            "jwt-clients"
+        );
+
+        // An unrelated token matches neither restriction.
+        assert!(
+            validate_tunnel(
+                &remote,
+                "/anything",
+                Some("Bearer some-other-token"),
+                &restrictions,
+                Some(&verifier),
+            )
+            .await
+            .is_none()
         );
     }
 
