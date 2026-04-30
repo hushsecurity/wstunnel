@@ -514,6 +514,28 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         .expect("Cannot convert restriction rules from path-prefix and restric-to")
     };
 
+    restrictions
+        .validate_runtime_consistency(args.jwt_keys_redis_url.is_some())
+        .expect("Invalid restrictions config");
+
+    let jwt_verifier = if let Some(redis_url) = args.jwt_keys_redis_url.as_deref() {
+        let redis_keys_hash = args
+            .jwt_keys_redis_hash
+            .as_deref()
+            .expect("--jwt-keys-redis-hash is required when --jwt-keys-redis-url is set");
+        let cfg = crate::restrictions::jwt::JwtRuntimeConfig {
+            redis_url: redis_url.to_string(),
+            redis_keys_hash: redis_keys_hash.to_string(),
+            key_cache_max_lifetime_sec: args.jwt_key_cache_max_lifetime_sec,
+        };
+        let verifier = crate::restrictions::jwt::JwtVerifier::from_config(&cfg)
+            .await
+            .expect("Failed to initialise the JWT verifier");
+        Some(Arc::new(verifier))
+    } else {
+        None
+    };
+
     let http_proxy = mk_http_proxy(args.http_proxy, args.http_proxy_login, args.http_proxy_password)?;
     let server_config = WsServerConfig {
         socket_so_mark: SoMark::new(args.socket_so_mark),
@@ -535,6 +557,7 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         restriction_config: args.restrict_config,
         http_proxy,
         remote_server_idle_timeout: args.remote_to_local_server_idle_timeout,
+        jwt_verifier,
     };
     let server = WsServer::new(server_config, executor);
 
