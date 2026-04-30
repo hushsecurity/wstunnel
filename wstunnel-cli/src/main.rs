@@ -61,6 +61,7 @@ pub enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    wstunnel::install_crypto_provider();
     let args = Wstunnel::parse();
 
     // Setup logging
