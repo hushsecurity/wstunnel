@@ -17,6 +17,25 @@ restrictions:
       # given in hex-digest format.
       # If present, Authentication Header must exists, must carry a Bearer token, and its hash must match.
       # - !BearerHash ["Sha256", "5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5"]
+      # This match applies if the Authorization Header carries a Bearer JWT whose RS256
+      # signature verifies against a kid-keyed public key fetched from Redis (configured via
+      # --jwt-keys-redis-url and --jwt-keys-redis-hash on the server subcommand) AND whose claims match
+      # the configured allow-lists. Each claim maps to a non-empty list of allowed string values;
+      # the decoded claim must equal at least one entry.
+      # `exp` and `nbf` are always enforced by the JWT library; they are not expressed in required_claims.
+      # `aud`, when listed in required_claims, is validated per RFC 7519: the token's aud may be a
+      # string or an array of strings, and the token matches if any of its audiences is allow-listed.
+      # If `aud` is omitted from required_claims, audience is not checked.
+      # Omitting `required_claims` (or leaving it empty) accepts ANY valid JWT - only the signature, `exp`,
+      # and `nbf` are checked. This is intentional but easy to miss; add at least one required claim
+      # (typically `sub` or `iss`) unless you really want to delegate authorisation to the issuer alone.
+      # - !Jwt
+      #     required_claims:
+      #       sub:
+      #         - my-expected-subject
+      #       # iss:
+      #       #   - my-issuer
+      #       #   - my-other-issuer
       # The only other possible match type for now is !Any, that match everything/any request
       # - !Any
 

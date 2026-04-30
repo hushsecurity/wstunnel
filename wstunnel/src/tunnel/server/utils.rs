@@ -122,6 +122,8 @@ impl RestrictionConfig {
                 MatchConfig::BearerHash(hash_type, hash_val) => {
                     authorization_header_val.is_some_and(|val| auth_bearer_match(hash_type, hash_val, val))
                 }
+                // JWT verification is wired up in a later commit; fail closed for now.
+                MatchConfig::Jwt(_) => false,
             };
             if !matched {
                 return false;

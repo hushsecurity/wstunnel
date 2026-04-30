@@ -33,6 +33,27 @@ pub enum MatchConfig {
     #[serde(with = "serde_regex")]
     Authorization(Regex),
     BearerHash(BearerHashType, String),
+    Jwt(JwtMatchConfig),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JwtMatchConfig {
+    /// Map of JWT claim name -> non-empty list of allowed string values.
+    /// The decoded claim must equal at least one entry (OR within the list);
+    /// every listed claim must pass (AND across claims).
+    /// `exp` and `nbf` are always validated by the JWT library (with the
+    /// library's default 60s leeway) and are not expressed here.
+    /// `aud` is special: when listed here it is validated per RFC 7519, so
+    /// the token's `aud` claim may be a string or an array of strings and
+    /// the token matches if any of its audiences is in the allow-list.
+    /// Other claims must be string-valued and equality-checked.
+    /// An empty (or omitted) map accepts any valid JWT -- only signature,
+    /// `exp`, and `nbf` are checked. Intentional but easy to miss; add at
+    /// least one required claim unless you really mean to delegate
+    /// authorisation entirely to the issuer.
+    #[serde(default)]
+    pub required_claims: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
