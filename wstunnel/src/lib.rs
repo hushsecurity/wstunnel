@@ -38,6 +38,18 @@ use tokio::task::JoinSet;
 use tracing::{error, info};
 use url::Url;
 
+/// Install the process-wide rustls `CryptoProvider` matching the cargo feature
+/// the binary was built with. Must be called before any rustls config is built
+/// (including transitively, e.g. by the `redis` crate's `tokio-rustls-comp`).
+/// `install_default` errors only when a provider is already installed, which is
+/// fine for library reuse and shared-process integration tests; ignore the result.
+pub fn install_crypto_provider() {
+    #[cfg(feature = "aws-lc-rs")]
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
+    #[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+}
+
 pub async fn run_client(args: Client, executor: impl TokioExecutor) -> anyhow::Result<()> {
     let tunnels = create_client_tunnels(args, executor.ref_clone()).await?;
 
