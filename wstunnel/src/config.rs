@@ -340,6 +340,44 @@ pub struct Server {
     #[cfg_attr(feature = "clap", arg(long, verbatim_doc_comment))]
     pub restrict_config: Option<PathBuf>,
 
+    /// Redis URL for fetching JWT public keys (one per JWT `kid`).
+    /// Required when restrictions.yaml configures a `!Jwt` matcher.
+    /// Credentials must be embedded in the URL: `redis://[user]:<password>@host:port/db`
+    /// or `rediss://...` for TLS.
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "URL", env = "WSTUNNEL_JWT_REDIS_URL", verbatim_doc_comment)
+    )]
+    pub jwt_redis_url: Option<String>,
+
+    /// Name of the Redis hash that maps each JWT `kid` (field) to a PEM-encoded
+    /// public key (value). The lookup is `HGET <table> <kid>`.
+    /// Required when --jwt-redis-url is set.
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "TABLE",
+            env = "WSTUNNEL_JWT_REDIS_KEYS_TABLE",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_redis_keys_table: Option<String>,
+
+    /// Evict a cached JWT public key after it has been unused for this many seconds.
+    /// Default: 604800 (1 week).
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "SECONDS",
+            default_value = "604800",
+            env = "WSTUNNEL_JWT_KEY_CACHE_IDLE_EVICTION_SEC",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_key_cache_idle_eviction_sec: u64,
+
     /// [Optional] Use custom certificate (pem) instead of the default embedded self-signed certificate.
     /// The certificate will be automatically reloaded if it changes
     #[cfg_attr(feature = "clap", arg(long, value_name = "FILE_PATH", verbatim_doc_comment))]
