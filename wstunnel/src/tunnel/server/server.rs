@@ -9,6 +9,7 @@ use crate::protocols;
 use crate::protocols::dns::DnsResolver;
 use crate::protocols::tls;
 use crate::restrictions::config_reloader::RestrictionsRulesReloader;
+use crate::restrictions::jwt::JwtVerifier;
 use crate::restrictions::types::{RestrictionConfig, RestrictionsRules};
 use crate::somark::SoMark;
 use crate::tunnel::connectors::{TcpTunnelConnector, TunnelConnector, UdpTunnelConnector};
@@ -63,6 +64,7 @@ pub struct WsServerConfig {
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
     pub remote_server_idle_timeout: Duration,
+    pub jwt_verifier: Option<Arc<JwtVerifier>>,
 }
 
 #[derive(Clone)]
@@ -536,6 +538,7 @@ impl Debug for WsServerConfig {
                     .map(|x| x.tls_client_ca_certificates.is_some())
                     .unwrap_or(false),
             )
+            .field("jwt_verifier", &self.jwt_verifier)
             .finish()
     }
 }
