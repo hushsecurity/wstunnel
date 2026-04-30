@@ -33,6 +33,17 @@ pub enum MatchConfig {
     #[serde(with = "serde_regex")]
     Authorization(Regex),
     BearerHash(BearerHashType, String),
+    Jwt(JwtMatchConfig),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JwtMatchConfig {
+    /// Map of JWT claim name -> non-empty list of allowed string values.
+    /// The decoded claim must equal at least one entry (OR within the list);
+    /// every listed claim must pass (AND across claims).
+    /// `exp` is always validated by the JWT library and is not expressed here.
+    #[serde(default)]
+    pub required_claims: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
