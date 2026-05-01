@@ -510,7 +510,7 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         panic!("restrictions configure a Jwt matcher but --jwt-redis-url is not set");
     }
 
-    let jwt_verifier = if let Some(redis_url) = args.jwt_redis_url.as_deref() {
+    let (jwt_verifier, jwt_cfg) = if let Some(redis_url) = args.jwt_redis_url.as_deref() {
         let redis_key_prefix = args
             .jwt_redis_key_prefix
             .as_deref()
@@ -525,9 +525,9 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         let verifier = crate::restrictions::jwt::JwtVerifier::from_config(&cfg)
             .await
             .expect("Failed to initialise the JWT verifier");
-        Some(Arc::new(verifier))
+        (Some(Arc::new(verifier)), Some(cfg))
     } else {
-        None
+        (None, None)
     };
 
     let http_proxy = mk_http_proxy(args.http_proxy, args.http_proxy_login, args.http_proxy_password)?;
@@ -560,6 +560,11 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         env!("CARGO_PKG_VERSION"),
         server.config
     );
+
+    if let Some(cfg) = jwt_cfg {
+        info!("JWT: {:?}", cfg);
+    }
+
     debug!("Restriction rules: {:#?}", restrictions);
     server.serve(restrictions).await
 }
