@@ -519,6 +519,8 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
             redis_url: redis_url.to_string(),
             redis_key_prefix: redis_key_prefix.to_string(),
             key_cache_idle_eviction_sec: args.jwt_key_cache_idle_eviction_sec,
+            redis_connect_timeout: Duration::from_secs(args.jwt_redis_connect_timeout_sec),
+            redis_response_timeout: Duration::from_secs(args.jwt_redis_response_timeout_sec),
         };
         let verifier = crate::restrictions::jwt::JwtVerifier::from_config(&cfg)
             .await
