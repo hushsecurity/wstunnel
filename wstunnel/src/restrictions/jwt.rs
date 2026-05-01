@@ -24,6 +24,10 @@ pub struct JwtRuntimeConfig {
     pub redis_keys_table: String,
     /// Evict a cached public key if it has not been used (no cache hit) for this many seconds.
     pub key_cache_idle_eviction_sec: u64,
+    /// Bound on the initial TCP connect to Redis at startup.
+    pub redis_connect_timeout: Duration,
+    /// Bound on every command's response (PING at startup, GET at runtime).
+    pub redis_response_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -81,8 +85,11 @@ impl std::fmt::Debug for JwtVerifier {
 impl JwtVerifier {
     pub async fn from_config(cfg: &JwtRuntimeConfig) -> anyhow::Result<Self> {
         let client = redis::Client::open(cfg.redis_url.as_str()).context("Invalid redis_url")?;
+        let conn_config = redis::AsyncConnectionConfig::new()
+            .set_connection_timeout(cfg.redis_connect_timeout)
+            .set_response_timeout(cfg.redis_response_timeout);
         let mut conn = client
-            .get_multiplexed_async_connection()
+            .get_multiplexed_async_connection_with_config(&conn_config)
             .await
             .context("Failed to open Redis connection")?;
         let _: String = redis::cmd("PING")
