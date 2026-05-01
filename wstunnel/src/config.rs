@@ -378,6 +378,34 @@ pub struct Server {
     )]
     pub jwt_key_cache_idle_eviction_sec: u64,
 
+    /// Connect timeout (seconds) when establishing the Redis connection at startup.
+    /// Default: 10.
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "SECONDS",
+            default_value = "10",
+            env = "WSTUNNEL_JWT_REDIS_CONNECT_TIMEOUT_SEC",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_redis_connect_timeout_sec: u64,
+
+    /// Response timeout (seconds) for each Redis command (PING at startup, GET at runtime).
+    /// Default: 10.
+    #[cfg_attr(
+        feature = "clap",
+        arg(
+            long,
+            value_name = "SECONDS",
+            default_value = "10",
+            env = "WSTUNNEL_JWT_REDIS_RESPONSE_TIMEOUT_SEC",
+            verbatim_doc_comment
+        )
+    )]
+    pub jwt_redis_response_timeout_sec: u64,
+
     /// [Optional] Use custom certificate (pem) instead of the default embedded self-signed certificate.
     /// The certificate will be automatically reloaded if it changes
     #[cfg_attr(feature = "clap", arg(long, value_name = "FILE_PATH", verbatim_doc_comment))]
