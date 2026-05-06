@@ -1,17 +1,9 @@
 builds:
   - goos:
       - linux
-      - darwin
-      - windows
-      - freebsd
-      - android
     goarch:
-      - "386"
       - amd64
       - arm64
-      - arm
-    goarm:
-      - "7"
     binary: wstunnel
     ignore:
       - goos: windows
