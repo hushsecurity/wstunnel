@@ -4,7 +4,7 @@ use anyhow::Context;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use redis::AsyncCommands;
-use redis::aio::MultiplexedConnection;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -59,7 +59,9 @@ struct CachedKey {
 
 enum KeyFetcher {
     Redis {
-        conn: MultiplexedConnection,
+        // ConnectionManager reconnects in the background (with backoff) when the
+        // underlying connection dies.
+        conn: ConnectionManager,
         keys_hash: String,
     },
     #[cfg(test)]
@@ -106,11 +108,13 @@ impl std::fmt::Debug for JwtVerifier {
 impl JwtVerifier {
     pub async fn from_config(cfg: &JwtRuntimeConfig) -> anyhow::Result<Self> {
         let client = redis::Client::open(cfg.redis_url.as_str()).context("Invalid redis_url")?;
-        let conn_config = redis::AsyncConnectionConfig::new()
+        let conn_config = ConnectionManagerConfig::new()
             .set_connection_timeout(cfg.redis_connect_timeout)
-            .set_response_timeout(cfg.redis_response_timeout);
+            .set_response_timeout(cfg.redis_response_timeout)
+            .set_number_of_retries(2)
+            .set_max_delay(1_000);
         let mut conn = client
-            .get_multiplexed_async_connection_with_config(&conn_config)
+            .get_connection_manager_with_config(conn_config)
             .await
             .context("Failed to open Redis connection")?;
         let _: String = redis::cmd("PING")
